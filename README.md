@@ -50,5 +50,6 @@ sub_140001170(Dst):
 Đầu tiên nó check đuôi file tại hàm sub_140001340
 <img width="962" height="361" alt="image" src="https://github.com/user-attachments/assets/0919dbb1-8aa4-4091-92a7-054ba7c20d2d" />
 <img width="856" height="180" alt="image" src="https://github.com/user-attachments/assets/0c0161ae-c79c-45e4-9e4b-a1d2af4d0714" />
+
 Nó check xem có phải file .txt, .jpg, .docx hay không nếu null thì close nếu có thì gọi hàm sub_1400013E0
 
