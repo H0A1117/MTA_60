@@ -52,4 +52,17 @@ sub_140001170(Dst):
 <img width="856" height="180" alt="image" src="https://github.com/user-attachments/assets/0c0161ae-c79c-45e4-9e4b-a1d2af4d0714" />
 
 Nó check xem có phải file .txt, .jpg, .docx hay không nếu null thì close nếu có thì gọi hàm sub_1400013E0
+<img width="972" height="906" alt="image" src="https://github.com/user-attachments/assets/06a0d07a-1781-4455-87aa-1fda3199b131" />
+Xem qua hàm thấy sinh ra 1 pbbuffer 16byte rồi dùng chính nó cho hàm sub_140001760(v12, v8, v13, pbBuffer)
+<img width="1028" height="721" alt="image" src="https://github.com/user-attachments/assets/49446be3-7f10-498b-808b-07491f822932" />
+
+Khai báo v8 8 byte và v9 8 byte ngay liền sau tạo thành 1 block 16 byte sau đó đem xor với v11, v12 hay chính là pbbuffer vừa sinh ra sau đó gọi hàm sub_140001910
+<img width="1028" height="721" alt="image" src="https://github.com/user-attachments/assets/6e66b2cb-09a4-44c3-a8f0-f427de34b81e" />
+
+Ta có thể thấy hàm này có 1 tham số là v8, 1 tham số là &unk_140ACCD80 hay chính là roundkey 16 bit
+
+
+
+
+
 
