@@ -40,13 +40,13 @@ Hàm `sub_140A49730` return `v11 = sub_1400010D0(*v10, v9, v8)` — tức là g�
 
 Phân tích `sub_1400010D0` (wmain): hàm dùng `ExpandEnvironmentStringsA` để tạo đường dẫn `%USERPROFILE%\Desktop\target`, kiểm tra thư mục đó có tồn tại không, rồi lần lượt gọi 3 hàm:
 
-- `sub_140036ED0()` — Key Schedule
-- `sub_140001170(Dst)` — Scan thư mục và mã hóa file
-- `sub_140001270(Dst)` — Dọn dẹp sau khi mã hóa
+- `sub_140036ED0()`
+- `sub_140001170(Dst)` 
+- `sub_140001270(Dst)` 
 
 ---
 
-## Bước 4: Phân tích `sub_140036ED0` — Key Schedule
+## Bước 4: Phân tích `sub_140036ED0`
 
 <img width="1440" height="1094" alt="image" src="https://github.com/user-attachments/assets/f73ecc42-d6fc-4c3c-b10c-99edcf90c854" />
 <img width="1440" height="1094" alt="image" src="https://github.com/user-attachments/assets/443272f3-900c-496d-a95a-d0b4f9c16923" />
@@ -119,7 +119,7 @@ W[k] = W[k-1] ^ W[k-8]
 
 ---
 
-## Bước 5: Phân tích `sub_140001170` — Scan thư mục và mã hóa
+## Bước 5: Phân tích `sub_140001170`
 
 <img width="962" height="553" alt="image" src="https://github.com/user-attachments/assets/7e052b97-332a-4b0b-9e89-6d75e24b840d" />
 
@@ -141,18 +141,9 @@ Hàm thực hiện theo thứ tự:
 3. Sinh **IV 16 bytes ngẫu nhiên** bằng `CryptGenRandom`
 4. Gọi `sub_140001760(plaintext, ciphertext_out, size, IV)` để mã hóa
 5. Đóng gói thành file `.rnwd` với cấu trúc header:
-
-```
-┌──────────┬───────────┬──────────────────┬──────────┬──────────────────┐
-│  "RWDT"  │ orig_size │       IV         │ 00 * 8   │   ciphertext     │
-│  4 bytes │  4 bytes  │    16 bytes      │ 8 bytes  │   N bytes        │
-└──────────┴───────────┴──────────────────┴──────────┴──────────────────┘
- offset 0   offset 4    offset 8           offset 24   offset 32
-```
-
 6. Ghi file `<tên gốc>.rnwd` rồi xóa file gốc bằng `DeleteFileA`
 
-### `sub_140001760` — CBC Encrypt Loop
+### `sub_140001760`
 
 <img width="1028" height="721" alt="image" src="https://github.com/user-attachments/assets/49446be3-7f10-498b-808b-07491f822932" />
 
@@ -171,55 +162,117 @@ CT[i] = encrypt(PT[i] XOR CT[i-1])
 
 <img width="1028" height="721" alt="image" src="https://github.com/user-attachments/assets/6e66b2cb-09a4-44c3-a8f0-f427de34b81e" />
 
-### `sub_140001910` — Block Cipher
+### `sub_140001910`
 
 Hàm nhận:
 - `a1 = &v8` — pointer đến block 16 bytes cần mã hóa
 - `a2 = &unk_140ACCD80` — pointer đến round key buffer W[0..59]
 
-Cấu trúc bên trong là **AES-256** với 14 rounds:
+Cấu trúc bên trong là:
+```c
+sub_140001A60(a1, v6)        // Load: input → state[4][4]
+sub_140001AE0(v6, RK[0])     // AddRoundKey(round 0)
 
-```
-Load(input → state[4][4])
-AddRoundKey(RK[0])
 for i = 1..14:
-    SubBytes     ← có INT3 exception, VEH/SEH can thiệp S-box
-    ShiftRows
-    MixColumns   ← chỉ round 1..13, bỏ qua round 14
-    AddRoundKey(RK[i])
-Store(state[4][4] → output)
+    SubBytes(v6)             // ← INT3 tại 0x1400019CA → VEH/SEH override S-box
+    sub_140001C00(v6)        // ShiftRows
+    if i < 14:
+        sub_140001CF0(v6)    // MixColumns (bỏ qua round 14)
+    sub_140001AE0(v6, RK[i]) // AddRoundKey(round i)
+
+sub_140001EB0(v6, a1)        // Store: state[4][4] → output (ghi đè input)
 ```
 
-Điểm đặc biệt: bên trong SubBytes có lệnh `__debugbreak()` (INT3 tại `0x1400019CA`). Khi exception xảy ra, **Vectored Exception Handler (VEH)** và **SEH frame handler** được cài sẵn từ trước sẽ can thiệp, thay đổi S-box lookup table theo từng round — đây là cơ chế obfuscate chính của bài.
+### Load / Store — Transpose
+
+`sub_140001A60` load input theo công thức: `state[col*4+row] = input[col + row*4]` (transpose).  
+`sub_140001EB0` store ngược lại: `output[col + row*4] = state[col*4+row]`.
+
+### AddRoundKey
+
+`sub_140001AE0` XOR state với round key. Layout đặc biệt: với mỗi cột `c`:
+```
+state[c]    ^= RK_word[c] >> 24
+state[c+4]  ^= RK_word[c] >> 16
+state[c+8]  ^= RK_word[c] >> 8
+state[c+12] ^= RK_word[c] & 0xFF
+```
+
+### ShiftRows
+
+`sub_140001C00` xoay các hàng:
+```
+row 0 (index 0,4,8,12):   không đổi
+row 1 (index 1,5,9,13):   rotate left 1
+row 2 (index 2,6,10,14):  swap pairs (rotate left 2)
+row 3 (index 3,7,11,15):  rotate right 1
+```
+
+### MixColumns
+
+`sub_140001CF0` nhân matrix GF(2^8) chuẩn AES cho từng cột.
+
+### SubBytes — Cơ chế obfuscate bằng Exception
+
+Đây là điểm mấu chốt của bài. Bên trong double loop SubBytes có lệnh `__debugbreak()` (INT3):
+
+```c
+for j = 0..3:       // cột
+    for k = 0..3:   // hàng (row)
+        __debugbreak();   // ← INT3 tại 0x1400019CA
+        state[j][k] = sbox[state[j][k]]
+        // sbox = 0x140ACC000 (AES S-box chuẩn)
+        // NHƯNG exception handler thay đổi RAX trước khi dùng!
+```
+**Kết luận:** Đây là Block Cipher (AES-256 biến thể)
+## Bước 7: Phân tích cơ chế VEH/SEH — Exception-based S-box
+
+### Global ctor cài đặt trước wmain
+
+Trước khi wmain chạy, `_initterm` đã gọi `sub_140034D70`:
+```c
+sub_140034D70:
+    sub_140034DA0()     // init obfuscation state
+    sub_140035510()     // AddVectoredExceptionHandler → cài VEH
+    sub_140035F90()     // patch SEH frame handler RVA tại runtime
+```
+
+Khi INT3 tại `0x1400019CA` kích hoạt, Windows gọi VEH trước, sau đó SEH frame handler.
+
+### VEH Handler — `sub_14023B700`
+
+VEH đọc biến `row` từ stack của hàm bị ngắt (`[RSP+0x28]`), sau đó rẽ nhánh theo `row % 4`:
+
+```
+row % 4 == 0:  RIP++, return EXCEPTION_CONTINUE_EXECUTION
+               → dùng RAX = 0x140ACC000 (AES S-box chuẩn)
+
+row % 4 == 1:  RAX = 0x140252170 + round * 174
+               → trỏ đến B1 table (S-box riêng cho row=1, stride 174 bytes/round)
+               RIP++, return EXCEPTION_CONTINUE_EXECUTION
+
+row % 4 == 2:  stack manipulation → chuyển sang SEH frame handler
+row % 4 == 3:  stack manipulation → chuyển sang SEH frame handler
+```
+
+### SEH Frame Handler — `sub_14033C7C0`
+
+```
+row % 4 == 2:  RAX = 0x140358399 + round * 67
+               → trỏ đến B2 table (S-box riêng cho row=2, stride 67 bytes/round)
+
+row % 4 == 3:  S-box tính toán qua exception chain (recovered empirically)
+```
+
+### Kết quả — 4 loại S-box theo row
+
+| Row | Nguồn S-box | Stride |
+|-----|-------------|--------|
+| 0 | `0x140ACC000` (AES S-box chuẩn) | — |
+| 1 | `0x140252170 + round × 174` | 174 bytes/round |
+| 2 | `0x140358399 + round × 67` | 67 bytes/round |
+| 3 | Runtime-computed via exception chain | — |
+
+Mỗi round dùng S-box khác nhau cho row 1, 2, 3 → block cipher **không phải AES chuẩn** dù cấu trúc giống hệt.
 
 ---
-
-## Kết luận
-
-Toàn bộ luồng mã hóa:
-
-```
-chall.exe khởi động
-    │
-    ├─ _initterm → global ctor → cài VEH + patch SEH frame handler
-    │
-    └─ wmain
-         ├─ sub_140036ED0  →  AES-256 Key Schedule  →  W[0..59] tại 0x140ACCD80
-         │
-         └─ sub_140001170  →  scan target\
-              └─ với mỗi .txt/.jpg/.docx:
-                   sub_1400013E0
-                        ├─ đọc file
-                        ├─ padding đến bội số 16
-                        ├─ sinh IV ngẫu nhiên 16 bytes
-                        ├─ sub_140001760  →  CBC encrypt
-                        │       └─ sub_140001910  →  AES-256 block cipher
-                        │                                (SubBytes qua VEH/SEH)
-                        ├─ đóng gói: RWDT|orig_size|IV|zeros|ciphertext
-                        └─ ghi .rnwd, xóa file gốc
-```
-
-Để giải mã `flag.txt.rnwd`, cần:
-1. Đọc IV từ offset 0x08 của file `.rnwd`
-2. Lấy round keys từ `0x140ACCD80` (dump lúc runtime)
-3. Giải mã CBC ngược lại với block cipher tương ứng
